@@ -21,6 +21,15 @@ library(knitr)
 # for charts
 library(ggplot2)
 
+# for branding
+library(grid)
+library(CRUKBrand)
+
+# for highcharts (also requires dplyr)
+library(highcharter)
+library(tidyr)
+
+
 ```
 
 ## Fetch Data
@@ -229,7 +238,7 @@ kable(head(agg_gender_age))
 
 Now can plot using ggplot.
 ```{r}
-plot_title = paste(l3_code, " Average Number of New Cases per Year\nUK, ", min_incidence_year, "-", incidence_year,  sep="")
+plot_title <- paste(l3_code, " Average Number of New Cases per Year\nUK, ", min_incidence_year, "-", incidence_year,  sep="")
 
 ggplot(data=agg_gender_age, aes(x=AGE_RANGE, y=INCIDENCE_COUNT, fill=GENDER_DESC)) + 
   geom_bar(stat="identity", position=position_dodge()) + 
@@ -239,6 +248,38 @@ ggplot(data=agg_gender_age, aes(x=AGE_RANGE, y=INCIDENCE_COUNT, fill=GENDER_DESC
 Looks pretty ugly! In the original, the text labels are wrapped. TODO: brand and make this better. TODO: age-specific incidence rates (need population).
 
 For some of the other stats, need to the same aggregations as above but without gender. This is so can average for persons. There is probably a better way to do this.
+
+
+```{r}
+plot_title <- paste(l3_code, " Average Number of New Cases per Year, UK, ", min_incidence_year, "-", incidence_year,  sep="")
+
+
+p <- ggplot(data=agg_gender_age, aes(x=AGE_RANGE, y=INCIDENCE_COUNT, fill=GENDER_DESC)) + 
+  geom_bar(stat="identity", position=position_dodge()) + 
+  labs(title=plot_title, x="Age at Diagnosis", y="Average Number of Cases Per Year", fill="Gender")
+
+grid.newpage()
+g <- applyCRUKBrand(p)
+grid.draw(g)
+
+```
+
+Still ugly, let's have another go.
+
+```{r}
+
+#highchart() %>% 
+#  hc_add_series(data=agg_gender_age$INCIDENCE_COUNT, type="column", name="Average Number of Cases Per Year") %>%
+#  hc_yAxis(title=list(text="Average Number of Cases Per Year")) %>%
+#  hc_xAxis(categories=agg_gender_age$AGE_RANGE)
+
+hchart(agg_gender_age, "column", x = AGE_RANGE, y = INCIDENCE_COUNT, group = GENDER_DESC) %>% 
+  hc_title(text="Average Number of New Cases per Year") %>%
+  hc_subtitle(text=paste("UK", min_incidence_year, "-", incidence_year)) %>%
+  hc_yAxis(title=list(text="Average Number of Cases Per Year")) %>%
+  hc_xAxis(title=list(text="Age Range"))
+
+```
 
 
 ```{r}
@@ -270,10 +311,13 @@ So can see the data without gender:
 ```{r}
 plot_title = paste(l3_code, " Average Number of New Cases per Year\nUK, ", min_incidence_year, "-", incidence_year,  sep="")
 
-ggplot(data=agg_age, aes(x=AGE_RANGE, y=INCIDENCE_COUNT)) + 
-  geom_bar(stat="identity") + 
-  labs(title=plot_title, x="Age at Diagnosis", y="Average Number of Cases Per Year")
+hchart(agg_age, "column", x = AGE_RANGE, y = INCIDENCE_COUNT) %>% 
+  hc_title(text="Average Number of New Cases per Year") %>%
+  hc_subtitle(text=paste("UK", min_incidence_year, "-", incidence_year)) %>%
+  hc_yAxis(title=list(text="Average Number of Cases Per Year")) %>%
+  hc_xAxis(title=list(text="Age Range"))
 
+  
 ```
 
 And some information (again - not using age standardised rates):
