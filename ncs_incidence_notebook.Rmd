@@ -25,17 +25,19 @@ library(ggplot2)
 
 ## Fetch Data
 
-The following is a basic query for cStream incidence data. Some of the subsequent functions could be done using SQL, but to keep the logic in one place and prevent return trips to the database, the aggregation and filtering is done later using dplyr.
+The following are some basic queries for national cancer stats data. Some more complex logic could be done using SQL, but to keep the logic in one place and prevent return trips to the database, the aggregation and filtering is done later using dplyr.
 
 The base year for the data below is 2017 (the data has already been subsetted in SQL Server for performance reasons).
 
 ```{r}
 channel <- odbcConnect("cStream", uid="cstream_admin@cstream.database.windows.net", pwd=.rs.askForPassword("Enter password:"));
+
 #get everything in fairly raw way - note could have got male/female as separate measures here rather than using dplyr later
 incidence <- sqlQuery(channel, "
 SELECT 
   cs.LEVEL3_CANCER_SITE_CODE,
   ar.AGE_RANGE,
+  ar.AGE_FROM,
   y.YEAR,
   g.GENDER_CODE,
   g.GENDER_DESC,
@@ -51,21 +53,55 @@ WHERE
 GROUP BY
   cs.LEVEL3_CANCER_SITE_CODE,
   ar.AGE_RANGE,
+  ar.AGE_FROM,
   y.YEAR,
   g.GENDER_CODE,
   g.GENDER_DESC
 ");
+
+population <- sqlQuery(channel, "
+SELECT 
+  ar.AGE_RANGE,
+  ar.AGE_FROM,
+  y.YEAR,
+  geo.REGION_CODE,
+  g.GENDER_CODE,
+  g.GENDER_DESC,
+  SUM(f.POPULATION_COUNT) as POPULATION_COUNT
+FROM 
+  dbo.FCT_POPULATION_2017 f 
+  INNER JOIN dbo.DIM_YEAR y ON f.POPULATION_YEAR_WID = y.YEAR_WID
+  INNER JOIN dbo.DIM_GEOGRAPHY geo ON f.REGION_WID = geo.REGION_WID
+  INNER JOIN dbo.DIM_AGE_RANGE ar ON f.AGE_RANGE_WID = ar.AGE_RANGE_WID
+  INNER JOIN dbo.DIM_GENDER g ON f.GENDER_WID = g.GENDER_WID
+GROUP BY
+  ar.AGE_RANGE,
+  ar.AGE_FROM,
+  y.YEAR,
+  geo.REGION_CODE,
+  g.GENDER_CODE,
+  g.GENDER_DESC
+");
+
 close(channel);
 
 ```
+
+Display first few rows of data
+
+```{r}
+kable(head(incidence))
+kable(head(population))
+```
+
 
 ## Set Variables
 These top level variables could be created as parameters in a function in a future iteration.
 
 ```{r}
-l3_code = 'Myeloma (C90)'
-incidence_year = 2014
-min_incidence_year = incidence_year - 2
+l3_code <- 'Bone (C40-C41)'
+incidence_year <- 2014
+min_incidence_year <- incidence_year - 2
 ```
 
 
@@ -109,49 +145,49 @@ ranked_l3 <- mutate(agg_l3,
 
 ```
 
-Display top 10 results
+Display sample of results
 ```{r}
+# get rank of cancer site so only see 5 rows either side
+cancer_rank <- ranked_l3[ranked_l3$LEVEL3_CANCER_SITE_CODE == l3_code,]$L3_RANK
+
+cancer_results <- ranked_l3 %>% select(LEVEL3_CANCER_SITE_CODE, INCIDENCE_COUNT, L3_RANK, L3_PC) %>% arrange(desc(INCIDENCE_COUNT)) %>% filter(L3_RANK >= cancer_rank - 5 & L3_RANK <= cancer_rank + 5)
+
+# bold the cancer site code - harder than it should be. Displaying decent HTML tables could be a problem here
+cancer_results$LEVEL3_CANCER_SITE_CODE <- as.character(cancer_results$LEVEL3_CANCER_SITE_CODE)
+cancer_results$LEVEL3_CANCER_SITE_CODE[cancer_results$LEVEL3_CANCER_SITE_CODE == l3_code] <- paste("**", l3_code, "**", sep="")
+
 # display a sample of results so far
-kable(ranked_l3 %>% select(LEVEL3_CANCER_SITE_CODE, INCIDENCE_COUNT, L3_RANK, L3_PC) %>% arrange(desc(INCIDENCE_COUNT)) %>% filter(L3_RANK <= 10), caption="L3 Cancer Sites Ranked by Incidence")
+kable(cancer_results, caption="L3 Cancer Sites Ranked by Incidence")
 ```
 
 
-
-
-Now can  do some calculations for the cancer type we're looking at.
+Now can  do some calculations for the cancer type we're looking at and display some sample figures.
 
 ```{r}
 # logic to get the row for the cancer type interested in
-L = ranked_l3$LEVEL3_CANCER_SITE_CODE == l3_code
+L <- ranked_l3$LEVEL3_CANCER_SITE_CODE == l3_code
 
-cancer_cases = format(ranked_l3[L,]$INCIDENCE_COUNT, big.mark=",")
-cancer_rank = paste(ranked_l3[L,]$L3_RANK, "th", sep="")
-cancer_pc = paste(ranked_l3[L,]$L3_PC, "%", sep="")
-cancer_cases_m = format(ranked_l3[L,]$INCIDENCE_COUNT_M, big.mark=",")
-cancer_rank_m = paste(ranked_l3[L,]$L3_RANK_M, "th", sep="")
-cancer_pc_m = paste(ranked_l3[L,]$L3_PC_M, "%", sep="")
-cancer_pc_tot_m = paste(round(100*ranked_l3[L,]$INCIDENCE_COUNT_M / ranked_l3[L,]$INCIDENCE_COUNT), "%", sep="")
-cancer_cases_f = format(ranked_l3[L,]$INCIDENCE_COUNT_F, big.mark=",")
-cancer_rank_f = paste(ranked_l3[L,]$L3_RANK_F, "th", sep="")
-cancer_pc_f = paste(ranked_l3[L,]$L3_PC_F, "%", sep="")
-cancer_pc_tot_f = paste(round(100*ranked_l3[L,]$INCIDENCE_COUNT_F / ranked_l3[L,]$INCIDENCE_COUNT), "%", sep="")
-```
+cancer_cases <- format(ranked_l3[L,]$INCIDENCE_COUNT, big.mark=",")
+cancer_rank <- paste(ranked_l3[L,]$L3_RANK, "th", sep="")
+cancer_pc <- paste(ranked_l3[L,]$L3_PC, "%", sep="")
+cancer_cases_m <- format(ranked_l3[L,]$INCIDENCE_COUNT_M, big.mark=",")
+cancer_rank_m <- paste(ranked_l3[L,]$L3_RANK_M, "th", sep="")
+cancer_pc_m <- paste(ranked_l3[L,]$L3_PC_M, "%", sep="")
+cancer_pc_tot_m <- paste(round(100*ranked_l3[L,]$INCIDENCE_COUNT_M / ranked_l3[L,]$INCIDENCE_COUNT), "%", sep="")
+cancer_cases_f <- format(ranked_l3[L,]$INCIDENCE_COUNT_F, big.mark=",")
+cancer_rank_f <- paste(ranked_l3[L,]$L3_RANK_F, "th", sep="")
+cancer_pc_f <- paste(ranked_l3[L,]$L3_PC_F, "%", sep="")
+cancer_pc_tot_f <- paste(round(100*ranked_l3[L,]$INCIDENCE_COUNT_F / ranked_l3[L,]$INCIDENCE_COUNT), "%", sep="")
 
-
-Display samples of figures we've discovered.
-
-```{r}
 cat(
   paste("* ", cancer_cases, " new cases of ", l3_code, ", ", incidence_year, ", UK", sep=""),
   paste("\n* ", l3_code, " is the ", cancer_rank, " most common cancer in the UK (", incidence_year, ")", sep=""),
   paste("\n* ", l3_code, " accounts for around ", cancer_pc, " of all new cases", sep=""),
-  paste("\n* ", "In males, it is the ", cancer_rank_m, " most common cancer (", cancer_pc_m, " of all male cases).", sep=""),
-  paste("\n* ", "In females, it is the ", cancer_rank_f, " most common cancer (", cancer_pc_f, " of all female cases).", sep=""),
+  paste("\n* ", "In males, it is the ", cancer_rank_m, " most common cancer (", cancer_pc_m, " of all male cases)", sep=""),
+  paste("\n* ", "In females, it is the ", cancer_rank_f, " most common cancer (", cancer_pc_f, " of all female cases)", sep=""),
   paste("\n* ", "In ", incidence_year, ", there were ", cancer_cases, " new cases of ", l3_code, " in the UK: ", cancer_cases_m, " (", cancer_pc_tot_m, ") in men and ", cancer_cases_f, " (", cancer_pc_tot_f, ") in women", sep=""))
 
-
 ```
-
 
 
 #Incidence by Age
@@ -163,6 +199,7 @@ age_incidence <- filter(incidence_base,
                            YEAR >= min_incidence_year,
                            YEAR <= incidence_year, 
                            LEVEL3_CANCER_SITE_CODE == l3_code)
+kable(head(age_incidence))
 ```
 
 Next, need to aggregate in two passes so can calculate the average incidence per year.
@@ -186,6 +223,8 @@ by_gender_age <- group_by(agg_gender_age_year,
 # calculate average per age range and gender
 agg_gender_age <- summarise(by_gender_age, 
                     INCIDENCE_COUNT=mean(INCIDENCE_COUNT))
+
+kable(head(agg_gender_age))
 ```
 
 Now can plot using ggplot.
@@ -197,3 +236,69 @@ ggplot(data=agg_gender_age, aes(x=AGE_RANGE, y=INCIDENCE_COUNT, fill=GENDER_DESC
   labs(title=plot_title, x="Age at Diagnosis", y="Average Number of Cases Per Year", fill="Gender")
 ```
 
+Looks pretty ugly! In the original, the text labels are wrapped. TODO: brand and make this better. TODO: age-specific incidence rates (need population).
+
+For some of the other stats, need to the same aggregations as above but without gender. This is so can average for persons. There is probably a better way to do this.
+
+
+```{r}
+# group by year and age range - so can sum before average
+by_age_year <- group_by(age_incidence, 
+                        AGE_RANGE,
+                        AGE_FROM,
+                        YEAR)
+
+# aggregate measures defined above by site code
+agg_age_year <- summarise(by_age_year, 
+                          INCIDENCE_COUNT=sum(INCIDENCE_COUNT))
+
+# now group by gender and age range alone, and average over the three years
+by_age <- group_by(agg_age_year, 
+                   AGE_RANGE,
+                   AGE_FROM)
+
+# calculate average per age range and gender
+agg_age <- summarise(by_age, 
+                     INCIDENCE_COUNT=mean(INCIDENCE_COUNT))
+
+kable(head(agg_age))
+```
+
+The next section is nonsense as not using age standardised rates, but just shows some of the figures that can be used to construct the narrative (e.g. see http://www.cancerresearchuk.org/health-professional/cancer-statistics/statistics-by-cancer-type/bone-sarcoma/incidence#heading-One).
+
+So can see the data without gender:
+```{r}
+plot_title = paste(l3_code, " Average Number of New Cases per Year\nUK, ", min_incidence_year, "-", incidence_year,  sep="")
+
+ggplot(data=agg_age, aes(x=AGE_RANGE, y=INCIDENCE_COUNT)) + 
+  geom_bar(stat="identity") + 
+  labs(title=plot_title, x="Age at Diagnosis", y="Average Number of Cases Per Year")
+
+```
+
+And some information (again - not using age standardised rates):
+
+```{r}
+# want to work out the peak, so sort and take first row, then get value of age range
+peak_age <- arrange(agg_age, desc(INCIDENCE_COUNT))[1, ]
+peak_age_range <- as.character(peak_age$AGE_RANGE)
+
+# want to work out the first age where more than half the cases are over that age
+# need a cumulative sum over the age descending as a percentage of the total
+# (could also be done using percentiles)
+half_age <- agg_age %>% arrange(desc(AGE_FROM))
+half_age$INCIDENCE_COUNT_PC = 100 * cumsum(half_age$INCIDENCE_COUNT) / sum(half_age$INCIDENCE_COUNT)
+
+# get the first row where over 50%
+half_age_50 <- (half_age %>% filter(INCIDENCE_COUNT_PC > 50))[1,]
+age_50_age_from = as.character(half_age_50$AGE_FROM)
+age_50_pc = round(as.numeric(half_age_50$INCIDENCE_COUNT_PC), 2)
+
+# output findings
+cat(
+  cat("Average incidence by age range: ", mean(agg_age$INCIDENCE_COUNT)),
+  cat("\nStandard deviation of incidence by age range: ", sd(agg_age$INCIDENCE_COUNT)),
+  cat("\nPeak age range: ", peak_age_range),
+  cat("\nOn average each year more than half (", age_50_pc, "%) of cases were diagnosed in people aged ", age_50_age_from, " and over", sep="")
+)
+```
