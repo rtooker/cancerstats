@@ -1,0 +1,199 @@
+---
+title: "National Cancer Stats Notebook"
+output: html_notebook
+---
+
+Some R code to reproduce some of the statistics in http://www.cancerresearchuk.org/health-professional/cancer-statistics/statistics-by-cancer-type/myeloma in a reproducable / rerunnable way for each cancer type in http://www.cancerresearchuk.org/health-professional/cancer-statistics/statistics-by-cancer-type.
+
+## Attach Libraries
+
+
+```{r}
+# connection for SQL Server
+library(RODBC)
+
+# for data manipuation
+library(dplyr)
+
+# for outputting tables in this notebook
+library(knitr)
+
+# for charts
+library(ggplot2)
+
+```
+
+## Fetch Data
+
+The following is a basic query for cStream incidence data. Some of the subsequent functions could be done using SQL, but to keep the logic in one place and prevent return trips to the database, the aggregation and filtering is done later using dplyr.
+
+The base year for the data below is 2017 (the data has already been subsetted in SQL Server for performance reasons).
+
+```{r}
+channel <- odbcConnect("cStream", uid="cstream_admin@cstream.database.windows.net", pwd=.rs.askForPassword("Enter password:"));
+#get everything in fairly raw way - note could have got male/female as separate measures here rather than using dplyr later
+incidence <- sqlQuery(channel, "
+SELECT 
+  cs.LEVEL3_CANCER_SITE_CODE,
+  ar.AGE_RANGE,
+  y.YEAR,
+  g.GENDER_CODE,
+  g.GENDER_DESC,
+  SUM(f.INCIDENCE_COUNT) as INCIDENCE_COUNT
+FROM 
+  [dbo].[FCT_INCIDENCE_2017] f 
+  INNER JOIN [dbo].[DIM_CANCER_SITE] cs ON f.[CANCER_SITE_WID] = cs.[CANCER_SITE_WID]
+  INNER JOIN [dbo].[DIM_YEAR] y ON f.[INCIDENCE_YEAR_WID] = y.[YEAR_WID]
+  INNER JOIN [dbo].[DIM_AGE_RANGE] ar ON f.[AGE_RANGE_WID] = ar.[AGE_RANGE_WID]
+  INNER JOIN [dbo].[DIM_GENDER] g ON f.[GENDER_WID] = g.[GENDER_WID]
+WHERE
+  cs.LEVEL1_CANCER_SITE_CODE = 'C00-C97: All Cancers'
+GROUP BY
+  cs.LEVEL3_CANCER_SITE_CODE,
+  ar.AGE_RANGE,
+  y.YEAR,
+  g.GENDER_CODE,
+  g.GENDER_DESC
+");
+close(channel);
+
+```
+
+## Set Variables
+These top level variables could be created as parameters in a function in a future iteration.
+
+```{r}
+l3_code = 'Myeloma (C90)'
+incidence_year = 2014
+min_incidence_year = incidence_year - 2
+```
+
+
+## Incidence by Sex and UK Country
+The following section filters, aggregates, ranks etc. using dplyr https://cran.rstudio.com/web/packages/dplyr/vignettes/introduction.html
+
+Filters have been specified to match the website mostly using guesswork just for the purposes of a demo - there will be other groupings/exclusions to be factored in.
+
+The dplyr functions have been written individually so can be demo'd/debugged, but chaining (%>%) could be used instead.
+
+```{r}
+# add gender measures upfront - will make formulas on ranking by gender simpler later
+incidence_base <- mutate(incidence,
+                         INCIDENCE_COUNT_M = ifelse(GENDER_CODE== 'M', INCIDENCE_COUNT, 0),
+                         INCIDENCE_COUNT_F = ifelse(GENDER_CODE== 'F', INCIDENCE_COUNT, 0))
+
+# get latest incidence for all cancer types
+latest_incidence <- filter(incidence_base, 
+                           YEAR == incidence_year, 
+                           LEVEL3_CANCER_SITE_CODE != 'Cancer of Unknown Primary (C77-C80)')
+
+
+# group by cancer site code so can rank etc.
+by_l3 <- group_by(latest_incidence, 
+                  LEVEL3_CANCER_SITE_CODE)
+
+# aggregate measures defined above by site code
+agg_l3 <- summarise(by_l3, 
+                    INCIDENCE_COUNT=sum(INCIDENCE_COUNT),
+                    INCIDENCE_COUNT_M=sum(INCIDENCE_COUNT_M),
+                    INCIDENCE_COUNT_F=sum(INCIDENCE_COUNT_F))
+
+# rank and calc percentages of totals for all, male, and female
+ranked_l3 <- mutate(agg_l3, 
+               L3_RANK = min_rank(desc(INCIDENCE_COUNT)), 
+               L3_PC = round(100* INCIDENCE_COUNT / sum(agg_l3$INCIDENCE_COUNT), 2),
+               L3_RANK_M = min_rank(desc(INCIDENCE_COUNT_M)), 
+               L3_PC_M = round(100* INCIDENCE_COUNT_M / sum(agg_l3$INCIDENCE_COUNT_M), 2),
+               L3_RANK_F = min_rank(desc(INCIDENCE_COUNT_F)), 
+               L3_PC_F = round(100* INCIDENCE_COUNT_F / sum(agg_l3$INCIDENCE_COUNT_F, 2)))
+
+```
+
+Display top 10 results
+```{r}
+# display a sample of results so far
+kable(ranked_l3 %>% select(LEVEL3_CANCER_SITE_CODE, INCIDENCE_COUNT, L3_RANK, L3_PC) %>% arrange(desc(INCIDENCE_COUNT)) %>% filter(L3_RANK <= 10), caption="L3 Cancer Sites Ranked by Incidence")
+```
+
+
+
+
+Now can  do some calculations for the cancer type we're looking at.
+
+```{r}
+# logic to get the row for the cancer type interested in
+L = ranked_l3$LEVEL3_CANCER_SITE_CODE == l3_code
+
+cancer_cases = format(ranked_l3[L,]$INCIDENCE_COUNT, big.mark=",")
+cancer_rank = paste(ranked_l3[L,]$L3_RANK, "th", sep="")
+cancer_pc = paste(ranked_l3[L,]$L3_PC, "%", sep="")
+cancer_cases_m = format(ranked_l3[L,]$INCIDENCE_COUNT_M, big.mark=",")
+cancer_rank_m = paste(ranked_l3[L,]$L3_RANK_M, "th", sep="")
+cancer_pc_m = paste(ranked_l3[L,]$L3_PC_M, "%", sep="")
+cancer_pc_tot_m = paste(round(100*ranked_l3[L,]$INCIDENCE_COUNT_M / ranked_l3[L,]$INCIDENCE_COUNT), "%", sep="")
+cancer_cases_f = format(ranked_l3[L,]$INCIDENCE_COUNT_F, big.mark=",")
+cancer_rank_f = paste(ranked_l3[L,]$L3_RANK_F, "th", sep="")
+cancer_pc_f = paste(ranked_l3[L,]$L3_PC_F, "%", sep="")
+cancer_pc_tot_f = paste(round(100*ranked_l3[L,]$INCIDENCE_COUNT_F / ranked_l3[L,]$INCIDENCE_COUNT), "%", sep="")
+```
+
+
+Display samples of figures we've discovered.
+
+```{r}
+cat(
+  paste("* ", cancer_cases, " new cases of ", l3_code, ", ", incidence_year, ", UK", sep=""),
+  paste("\n* ", l3_code, " is the ", cancer_rank, " most common cancer in the UK (", incidence_year, ")", sep=""),
+  paste("\n* ", l3_code, " accounts for around ", cancer_pc, " of all new cases", sep=""),
+  paste("\n* ", "In males, it is the ", cancer_rank_m, " most common cancer (", cancer_pc_m, " of all male cases).", sep=""),
+  paste("\n* ", "In females, it is the ", cancer_rank_f, " most common cancer (", cancer_pc_f, " of all female cases).", sep=""),
+  paste("\n* ", "In ", incidence_year, ", there were ", cancer_cases, " new cases of ", l3_code, " in the UK: ", cancer_cases_m, " (", cancer_pc_tot_m, ") in men and ", cancer_cases_f, " (", cancer_pc_tot_f, ") in women", sep=""))
+
+
+```
+
+
+
+#Incidence by Age
+For age, going to work with gender breakdown a little differently. Eventually we want a bar chart with bars for both male and female - so we will leave gender as a grouping rather than creating the indiviudal measures in the previous section which were useful for ranking.
+
+First filter the data for a single cancer type (no ranking/context required here) and for a 3 year range.
+```{r}
+age_incidence <- filter(incidence_base, 
+                           YEAR >= min_incidence_year,
+                           YEAR <= incidence_year, 
+                           LEVEL3_CANCER_SITE_CODE == l3_code)
+```
+
+Next, need to aggregate in two passes so can calculate the average incidence per year.
+
+```{r}
+# group by gender, year and age range - so can sum before average
+by_gender_age_year <- group_by(age_incidence, 
+                        GENDER_DESC,
+                        AGE_RANGE,
+                        YEAR)
+
+# aggregate measures defined above by site code
+agg_gender_age_year <- summarise(by_gender_age_year, 
+                                 INCIDENCE_COUNT=sum(INCIDENCE_COUNT))
+
+# now group by gender and age range alone, and average over the three years
+by_gender_age <- group_by(agg_gender_age_year, 
+                         GENDER_DESC,
+                         AGE_RANGE)
+
+# calculate average per age range and gender
+agg_gender_age <- summarise(by_gender_age, 
+                    INCIDENCE_COUNT=mean(INCIDENCE_COUNT))
+```
+
+Now can plot using ggplot.
+```{r}
+plot_title = paste(l3_code, " Average Number of New Cases per Year\nUK, ", min_incidence_year, "-", incidence_year,  sep="")
+
+ggplot(data=agg_gender_age, aes(x=AGE_RANGE, y=INCIDENCE_COUNT, fill=GENDER_DESC)) + 
+  geom_bar(stat="identity", position=position_dodge()) + 
+  labs(title=plot_title, x="Age at Diagnosis", y="Average Number of Cases Per Year", fill="Gender")
+```
+
