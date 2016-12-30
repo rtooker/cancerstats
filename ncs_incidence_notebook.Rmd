@@ -231,7 +231,7 @@ by_gender_age <- group_by(agg_gender_age_year,
 
 # calculate average per age range and gender
 agg_gender_age <- summarise(by_gender_age, 
-                    INCIDENCE_COUNT=mean(INCIDENCE_COUNT))
+                    AVG_INCIDENCE_COUNT=round(mean(INCIDENCE_COUNT)))
 
 kable(head(agg_gender_age))
 ```
@@ -240,7 +240,7 @@ Now can plot using ggplot.
 ```{r}
 plot_title <- paste(l3_code, " Average Number of New Cases per Year\nUK, ", min_incidence_year, "-", incidence_year,  sep="")
 
-ggplot(data=agg_gender_age, aes(x=AGE_RANGE, y=INCIDENCE_COUNT, fill=GENDER_DESC)) + 
+ggplot(data=agg_gender_age, aes(x=AGE_RANGE, y=AVG_INCIDENCE_COUNT, fill=GENDER_DESC)) + 
   geom_bar(stat="identity", position=position_dodge()) + 
   labs(title=plot_title, x="Age at Diagnosis", y="Average Number of Cases Per Year", fill="Gender")
 ```
@@ -254,7 +254,7 @@ For some of the other stats, need to the same aggregations as above but without 
 plot_title <- paste(l3_code, " Average Number of New Cases per Year, UK, ", min_incidence_year, "-", incidence_year,  sep="")
 
 
-p <- ggplot(data=agg_gender_age, aes(x=AGE_RANGE, y=INCIDENCE_COUNT, fill=GENDER_DESC)) + 
+p <- ggplot(data=agg_gender_age, aes(x=AGE_RANGE, y=AVG_INCIDENCE_COUNT, fill=GENDER_DESC)) + 
   geom_bar(stat="identity", position=position_dodge()) + 
   labs(title=plot_title, x="Age at Diagnosis", y="Average Number of Cases Per Year", fill="Gender")
 
@@ -273,8 +273,8 @@ Still ugly, let's have another go.
 #  hc_yAxis(title=list(text="Average Number of Cases Per Year")) %>%
 #  hc_xAxis(categories=agg_gender_age$AGE_RANGE)
 
-hchart(agg_gender_age, "column", x = AGE_RANGE, y = INCIDENCE_COUNT, group = GENDER_DESC) %>% 
-  hc_title(text="Average Number of New Cases per Year") %>%
+hchart(agg_gender_age, "column", x = AGE_RANGE, y = AVG_INCIDENCE_COUNT, group = GENDER_DESC) %>% 
+  hc_title(text=paste(l3_code, "Average Number of New Cases per Year")) %>%
   hc_subtitle(text=paste("UK", min_incidence_year, "-", incidence_year)) %>%
   hc_yAxis(title=list(text="Average Number of Cases Per Year")) %>%
   hc_xAxis(title=list(text="Age Range"))
@@ -300,7 +300,7 @@ by_age <- group_by(agg_age_year,
 
 # calculate average per age range and gender
 agg_age <- summarise(by_age, 
-                     INCIDENCE_COUNT=mean(INCIDENCE_COUNT))
+                     AVG_INCIDENCE_COUNT=round(mean(INCIDENCE_COUNT)))
 
 kable(head(agg_age))
 ```
@@ -311,7 +311,7 @@ So can see the data without gender:
 ```{r}
 plot_title = paste(l3_code, " Average Number of New Cases per Year\nUK, ", min_incidence_year, "-", incidence_year,  sep="")
 
-hchart(agg_age, "column", x = AGE_RANGE, y = INCIDENCE_COUNT) %>% 
+hchart(agg_age, "column", x = AGE_RANGE, y = AVG_INCIDENCE_COUNT) %>% 
   hc_title(text="Average Number of New Cases per Year") %>%
   hc_subtitle(text=paste("UK", min_incidence_year, "-", incidence_year)) %>%
   hc_yAxis(title=list(text="Average Number of Cases Per Year")) %>%

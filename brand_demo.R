@@ -1,8 +1,4 @@
 # libraries for branding (could these be loaded via the CRUKBrand library??)
-library(ggplot2)
-library(grid)
-library(gridExtra)
-library(png)
 
 #load CRUK brand defaults - need to install CRUKBrand, using devtools install_github, eg:
 # > install.packages(devtools)
