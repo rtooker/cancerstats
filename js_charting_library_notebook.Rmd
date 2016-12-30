@@ -1,0 +1,212 @@
+---
+title: "JavaScript Charting Libraries"
+output: html_notebook
+---
+
+This notebook is to explore charting library options for exporting for the web.
+
+Start with some data:
+
+```{r}
+# connection for SQL Server
+library(RODBC)
+
+# for data manipuation
+library(dplyr)
+
+# for outputting tables in this notebook
+library(knitr)
+
+# for charts
+library(ggplot2)
+
+# for branding
+library(grid)
+library(CRUKBrand)
+
+# for highcharts (also requires dplyr)
+library(highcharter)
+library(tidyr)
+
+# get data
+channel <- odbcConnect("cStream", uid="cstream_admin@cstream.database.windows.net", pwd=.rs.askForPassword("Enter password:"));
+
+#get everything in fairly raw way - note could have got male/female as separate measures here rather than using dplyr later
+incidence <- sqlQuery(channel, "
+SELECT 
+  cs.LEVEL3_CANCER_SITE_CODE,
+  ar.AGE_RANGE,
+  ar.AGE_FROM,
+  y.YEAR,
+  g.GENDER_CODE,
+  g.GENDER_DESC,
+  SUM(f.INCIDENCE_COUNT) as INCIDENCE_COUNT
+FROM 
+  [dbo].[FCT_INCIDENCE_2017] f 
+  INNER JOIN [dbo].[DIM_CANCER_SITE] cs ON f.[CANCER_SITE_WID] = cs.[CANCER_SITE_WID]
+  INNER JOIN [dbo].[DIM_YEAR] y ON f.[INCIDENCE_YEAR_WID] = y.[YEAR_WID]
+  INNER JOIN [dbo].[DIM_AGE_RANGE] ar ON f.[AGE_RANGE_WID] = ar.[AGE_RANGE_WID]
+  INNER JOIN [dbo].[DIM_GENDER] g ON f.[GENDER_WID] = g.[GENDER_WID]
+WHERE
+  cs.LEVEL1_CANCER_SITE_CODE = 'C00-C97: All Cancers'
+GROUP BY
+  cs.LEVEL3_CANCER_SITE_CODE,
+  ar.AGE_RANGE,
+  ar.AGE_FROM,
+  y.YEAR,
+  g.GENDER_CODE,
+  g.GENDER_DESC
+");
+
+close(channel);
+
+```
+
+Create a basic chart
+```{r}
+l3_code <- 'Bone (C40-C41)'
+incidence_year <- 2014
+min_incidence_year <- incidence_year - 2
+
+incidence_3yr <- incidence %>% 
+  filter(YEAR >= min_incidence_year, YEAR <= incidence_year,LEVEL3_CANCER_SITE_CODE == l3_code) %>%
+  mutate(INCIDENCE_COUNT_M = ifelse(GENDER_CODE== 'M', INCIDENCE_COUNT, 0),
+         INCIDENCE_COUNT_F = ifelse(GENDER_CODE== 'F', INCIDENCE_COUNT, 0)) %>%
+  group_by(GENDER_DESC, AGE_RANGE, YEAR) %>%
+  summarise(INCIDENCE_COUNT=sum(INCIDENCE_COUNT))
+
+incidence_3yr_mean <- incidence_3yr %>%
+  group_by(GENDER_DESC, AGE_RANGE) %>%
+  summarise(AVG_INCIDENCE_COUNT=round(mean(INCIDENCE_COUNT)))
+
+
+hchart(agg_gender_age, "column", x = AGE_RANGE, y = AVG_INCIDENCE_COUNT, group = GENDER_DESC) %>% 
+  hc_title(text=paste(l3_code, "Average Number of New Cases per Year")) %>%
+  hc_subtitle(text=paste("UK", min_incidence_year, "-", incidence_year)) %>%
+  hc_yAxis(title=list(text="Average Number of Cases Per Year")) %>%
+  hc_xAxis(title=list(text="Age Range"))
+
+```
+
+Add add export option. Note that order of chaining appears to be important (exporting first, then titles etc.)
+
+```{r}
+
+hchart(agg_gender_age, "column", x = AGE_RANGE, y = AVG_INCIDENCE_COUNT, group = GENDER_DESC) %>% 
+  hc_exporting(enabled = TRUE, filename=l3_code) %>%
+  hc_title(text=paste(l3_code, "Average Number of New Cases per Year")) %>%
+  hc_subtitle(text=paste("UK", min_incidence_year, "-", incidence_year)) %>%
+  hc_yAxis(title=list(text="Average Number of Cases Per Year")) %>%
+  hc_xAxis(title=list(text="Age Range"))
+
+
+```
+
+Annoyingly, the CSV and Excel options are not available. Options are PNG, JPEG, SVG, and PDF. Export options only work once rendered in a browser. In demo CSV and EXcel are available http://jkunst.com/highcharter/plugins.html#exporting-csv
+
+Documentation doesn't appear to help:
+https://www.rdocumentation.org/packages/highcharter/versions/0.4.0/topics/hc_exporting
+http://api.highcharts.com/highcharts/exporting
+
+Try something closer to the example (chart doesn't make sense:)
+
+```{r}
+
+# this is a bit annoying - core classes don't seem to have an easy way to group/split series so need to unpivot the data
+library (reshape)
+agg_gender_age_pvt <- cast(agg_gender_age, AGE_RANGE~GENDER_DESC)
+
+highchart() %>% 
+  hc_xAxis(categories = agg_gender_age_pvt$AGE_RANGE, title=list(text="Age Range")) %>%
+  hc_yAxis(title=list(text="Average Number of Cases Per Year")) %>%
+  hc_add_series(
+    type="column", 
+    name = "Male", 
+    data = agg_gender_age_pvt$Male) %>%
+  hc_add_series(
+    type="column", 
+    name = "Female", 
+    data = agg_gender_age_pvt$Female) %>%
+  hc_title(text=paste(l3_code, "Average Number of New Cases per Year")) %>%
+  hc_subtitle(text=paste("UK", min_incidence_year, "-", incidence_year)) %>%
+  hc_exporting(enabled = TRUE, filename=l3_code)
+
+
+```
+
+
+Same result - may need to add the additional javascript libraries for the CSV exports (to test).
+
+Now try some basic theming:
+
+
+```{r}
+
+CRUKTheme <- hc_theme(
+ colors = c("#2E008B", "#EC008C", "#00B6ED", "#A7A8AA", "#AB99D1", "#F799D1", "#99E2F8"),
+ chart = list(
+  backgroundColor = "#FFFFFF"
+ ),
+ title = list(
+   style = list(
+     color = '#2E008B'
+   )
+ ),
+ subtitle = list(
+   style = list(
+     color = '#2E008B'
+   )
+ ),
+ legend = list(
+   itemStyle = list(
+     color = '#2E008B'
+   ),
+   itemHoverStyle = list(
+     color = '#2E008B'
+   )   
+  )
+)
+
+hc <- highchart() %>% 
+  hc_xAxis(categories = agg_gender_age_pvt$AGE_RANGE, title=list(text="Age Range")) %>%
+  hc_yAxis(title=list(text="Average Number of Cases Per Year")) %>%
+  hc_add_series(
+    type="column", 
+    name = "Male", 
+    data = agg_gender_age_pvt$Male) %>%
+  hc_add_series(
+    type="column", 
+    name = "Female", 
+    data = agg_gender_age_pvt$Female) %>%
+  hc_title(text=paste(l3_code, "Average Number of New Cases per Year")) %>%
+  hc_subtitle(text=paste("UK", min_incidence_year, "-", incidence_year)) %>%
+  hc_exporting(enabled = TRUE, filename=l3_code) #%>%
+
+hc %>% hc_add_theme(CRUKTheme)
+
+```
+
+
+Next try to export widgets https://www.rdocumentation.org/packages/htmlwidgets/versions/0.3.2/topics/saveWidget
+
+```{r}
+library(htmlwidgets)
+hcbranded <- hc %>% hc_add_theme(CRUKTheme)
+saveWidget(hcbranded, file="widget_self_contained.html", selfcontained=TRUE)
+saveWidget(hcbranded, file="widget.html", libdir="lib", selfcontained=FALSE)
+
+```
+
+Notes:
+1. SaveWidget feels slow, but does seem to get faster on re-runs (about 7 seconds eventually)
+2. Self-contained is 1.7MB
+3. Non self-contaiend is 4.4KB
+4. Non self-contained directory structure contains the various javascript and css files for each library (e.g. highcharts, jquery). They are not specific to the widget (so no need to republish). 
+5. References are relative in the html file (e.g. <script src="lib/htmlwidgets-0.8/htmlwidgets.js"></script>)
+6. Structure is consistent so could strip out the div and the related json (which has a unique ID such as data-for="htmlwidget-aa953288dad3c45a794a") and embed that in drupal if don't want to down the iframe route
+7. Doesn't appear to create a js object that could be referenced elsewhere (e.g. create own buttons for exporting data)
+
+
+
+
+
